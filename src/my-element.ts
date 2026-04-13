@@ -19,6 +19,9 @@ type SkillProfileRecord = {
 }
 
 type SkillProfileResponse = {
+  totalResources?: number
+  pageNumber?: number
+  pageSize?: number
   resources?: SkillProfileRecord[]
   items?: SkillProfileRecord[]
 }
@@ -120,24 +123,7 @@ export class MyElement extends LitElement {
     this.error = ''
 
     try {
-      this.apiRequestCount += 1
-
-      const url = `${this.baseUrl.replace(/\/$/, '')}/organization/${encodeURIComponent(this.orgId)}/skill-profile/bulk-export?page=0&pageSize=100`
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          Accept: 'application/json, */*',
-        },
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `Skill profile fetch failed with status ${response.status}: ${errorText || 'No response body'}`
-        )
-      }
-
-      const result = (await response.json()) as SkillProfileResponse | SkillProfileResponse[]
+      const result = await this.fetchAllPages()
       const rows = this.flattenPayload(result)
         .map((record: SkillProfileRecord) => this.normalizeRecord(record))
         .sort((left: MatrixRow, right: MatrixRow) => left.name.localeCompare(right.name))
@@ -151,6 +137,60 @@ export class MyElement extends LitElement {
     } finally {
       this.loading = false
     }
+  }
+
+  private async fetchSkillProfilePage(page: number, pageSize: number) {
+    this.apiRequestCount += 1
+
+    const url =
+      `${this.baseUrl.replace(/\/$/, '')}/organization/${encodeURIComponent(this.orgId)}` +
+      `/skill-profile/bulk-export?page=${page}&pageSize=${pageSize}`
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/json, */*',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(
+        `Skill profile fetch failed with status ${response.status}: ${errorText || 'No response body'}`
+      )
+    }
+
+    return (await response.json()) as SkillProfileResponse
+  }
+
+  private async fetchAllPages() {
+    const firstPage = await this.fetchSkillProfilePage(0, 100)
+    const pageSize = Number(firstPage.pageSize ?? 100)
+    const totalResources = Number(
+      firstPage.totalResources ?? (Array.isArray(firstPage.resources) ? firstPage.resources.length : 0)
+    )
+    const totalPages = Math.max(1, Math.ceil(totalResources / pageSize))
+
+    if (totalPages === 1) {
+      return firstPage
+    }
+
+    const remainingPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, index) =>
+        this.fetchSkillProfilePage(index + 1, pageSize)
+      )
+    )
+
+    return {
+      ...firstPage,
+      resources: [
+        ...(firstPage.resources ?? []),
+        ...remainingPages.flatMap((page) => page.resources ?? []),
+      ],
+      totalResources,
+      pageNumber: 0,
+      pageSize,
+    } satisfies SkillProfileResponse
   }
 
   private flattenPayload(
