@@ -5,14 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WxCC Agent Desktop Agent Skill Matrix</title>
     <link rel="stylesheet" href="./src/index.css" />
+    <script src="/local-config.js"></script>
     <script type="module" src="/src/my-element.ts"></script>
   </head>
   <body>
-<agent-skill-matrix-dashboard
-  token="ODRkM2MxYTUtYzdiYi00NjcyLWI4NzEtNTE0MGU0Mjg1MDVjZjQ1Njg3ZGQtZGIx_PF84_183361eb-b803-4a69-8814-ae4432e025f7"
-  org-id="183361eb-b803-4a69-8814-ae4432e025f7"
-  refresh-ms="30000"
-></agent-skill-matrix-dashboard>
+    <script>
+      const config = window.LOCAL_CONFIG || {}
+      const widget = document.createElement('agent-skill-matrix-dashboard')
 
+      widget.setAttribute('token', config.token || '')
+      widget.setAttribute('org-id', config.orgId || '')
+      widget.setAttribute('base-url', config.baseUrl || 'https://api.wxcc-us1.cisco.com')
+      widget.setAttribute('refresh-ms', String(config.refreshMs ?? 30000))
+      widget.setAttribute('darkmode', String(Boolean(config.darkmode)))
+
+      document.body.appendChild(widget)
+    </script>
   </body>
 </html>
