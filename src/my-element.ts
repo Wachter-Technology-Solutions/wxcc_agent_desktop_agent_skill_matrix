@@ -47,9 +47,7 @@ export class MyElement extends LitElement {
   @state() private loading = false
   @state() private error = ''
   @state() private rows: MatrixRow[] = []
-  @state() private lastUpdatedAt = 0
-  @state() private lastRefreshMode: 'manual' | 'automatic' = 'manual'
-  @state() private relativeTimeTick = 0
+  @state() private lastUpdated = ''
   @state() private apiRequestCount = 0
   @state() private searchTerm = ''
   @state() private skillFilters: string[] = []
@@ -60,10 +58,8 @@ export class MyElement extends LitElement {
   @state() private isTransposed = false
   @state() private autoRefreshEnabled = false
   @state() private darkModeEnabled = false
-  @state() private verticalSkillHeaders = true
 
   private timerId?: number
-  private relativeTimeTimerId?: number
   private boundWindowPointerDown = (event: PointerEvent) =>
     this.handleWindowPointerDown(event)
 
@@ -72,10 +68,8 @@ export class MyElement extends LitElement {
     this.restoreSkillFilters()
     this.restoreHideEmptyColumns()
     this.restoreDarkModePreference()
-    this.restoreVerticalSkillHeaders()
     window.addEventListener('pointerdown', this.boundWindowPointerDown)
-    this.startRelativeTimeTimer()
-    this.loadData('manual')
+    this.loadData()
     this.startRefreshTimer()
   }
 
@@ -84,9 +78,6 @@ export class MyElement extends LitElement {
     window.removeEventListener('pointerdown', this.boundWindowPointerDown)
     if (this.timerId) {
       window.clearInterval(this.timerId)
-    }
-    if (this.relativeTimeTimerId) {
-      window.clearInterval(this.relativeTimeTimerId)
     }
   }
 
@@ -100,8 +91,7 @@ export class MyElement extends LitElement {
       changedProperties.has('skillFilters') ||
       changedProperties.has('hideEmptyColumns') ||
       changedProperties.has('darkmode') ||
-      changedProperties.has('darkModeEnabled') ||
-      changedProperties.has('verticalSkillHeaders')
+      changedProperties.has('darkModeEnabled')
     ) {
       this.startRefreshTimer()
       if (
@@ -116,7 +106,6 @@ export class MyElement extends LitElement {
     if (changedProperties.has('orgId')) {
       this.restoreSkillFilters()
       this.restoreHideEmptyColumns()
-      this.restoreVerticalSkillHeaders()
     }
 
     if (changedProperties.has('skillFilters')) {
@@ -134,10 +123,6 @@ export class MyElement extends LitElement {
     if (changedProperties.has('darkModeEnabled')) {
       this.persistDarkModePreference()
     }
-
-    if (changedProperties.has('verticalSkillHeaders')) {
-      this.persistVerticalSkillHeaders()
-    }
   }
 
   private startRefreshTimer() {
@@ -153,23 +138,10 @@ export class MyElement extends LitElement {
       return
     }
 
-    this.timerId = window.setInterval(
-      () => this.loadData('automatic'),
-      this.refreshMs
-    )
+    this.timerId = window.setInterval(() => this.loadData(), this.refreshMs)
   }
 
-  private startRelativeTimeTimer() {
-    if (this.relativeTimeTimerId) {
-      window.clearInterval(this.relativeTimeTimerId)
-    }
-
-    this.relativeTimeTimerId = window.setInterval(() => {
-      this.relativeTimeTick = Date.now()
-    }, 60000)
-  }
-
-  private async loadData(refreshMode: 'manual' | 'automatic' = 'manual') {
+  private async loadData() {
     if (!this.token) {
       this.error = 'Missing access token.'
       this.rows = []
@@ -193,9 +165,7 @@ export class MyElement extends LitElement {
 
       this.rows = rows
       this.reconcileSkillFilters()
-      this.lastUpdatedAt = Date.now()
-      this.lastRefreshMode = refreshMode
-      this.relativeTimeTick = this.lastUpdatedAt
+      this.lastUpdated = new Date().toLocaleTimeString()
     } catch (error) {
       this.rows = []
       this.error =
@@ -330,10 +300,6 @@ export class MyElement extends LitElement {
     return `wxcc-agent-skill-matrix:dark-mode:${this.orgId || 'default'}`
   }
 
-  private get verticalSkillHeadersStorageKey() {
-    return `wxcc-agent-skill-matrix:vertical-skill-headers:${this.orgId || 'default'}`
-  }
-
   private restoreSkillFilters() {
     try {
       const raw = window.localStorage.getItem(this.skillStorageKey)
@@ -417,31 +383,6 @@ export class MyElement extends LitElement {
     }
   }
 
-  private restoreVerticalSkillHeaders() {
-    try {
-      const raw = window.localStorage.getItem(this.verticalSkillHeadersStorageKey)
-      if (raw === null) {
-        this.verticalSkillHeaders = true
-        return
-      }
-
-      this.verticalSkillHeaders = raw === 'true'
-    } catch {
-      this.verticalSkillHeaders = true
-    }
-  }
-
-  private persistVerticalSkillHeaders() {
-    try {
-      window.localStorage.setItem(
-        this.verticalSkillHeadersStorageKey,
-        String(this.verticalSkillHeaders)
-      )
-    } catch {
-      // Ignore storage failures so the widget still works in constrained environments.
-    }
-  }
-
   private reconcileSkillFilters() {
     const validSkills = new Set(this.getAllSkillColumns())
     const nextSkillFilters = this.skillFilters.filter((skill) => validSkills.has(skill))
@@ -484,20 +425,9 @@ export class MyElement extends LitElement {
 
   private getVisibleColumns(filteredRows: MatrixRow[]) {
     let columns = this.getAllSkillColumns()
-    const query = this.searchTerm.trim().toLowerCase()
 
     if (this.skillFilters.length > 0) {
       columns = columns.filter((skill) => this.skillFilters.includes(skill))
-    }
-
-    if (query) {
-      const matchingColumns = columns.filter((skill) =>
-        skill.toLowerCase().includes(query)
-      )
-
-      if (matchingColumns.length > 0) {
-        columns = matchingColumns
-      }
     }
 
     if (this.hideEmptyColumns) {
@@ -601,10 +531,6 @@ export class MyElement extends LitElement {
     this.darkModeEnabled = (event.target as HTMLInputElement).checked
   }
 
-  private toggleVerticalSkillHeaders(event: Event) {
-    this.verticalSkillHeaders = (event.target as HTMLInputElement).checked
-  }
-
   private toggleTranspose() {
     this.isTransposed = !this.isTransposed
   }
@@ -630,38 +556,12 @@ export class MyElement extends LitElement {
     return this.darkModeEnabled ? 'theme-dark' : 'theme-light'
   }
 
-  private getRefreshStatusText() {
-    void this.relativeTimeTick
-
-    if (!this.lastUpdatedAt) {
-      return 'Not yet refreshed'
-    }
-
-    const elapsedMs = Math.max(0, Date.now() - this.lastUpdatedAt)
-    const elapsedMinutes = Math.floor(elapsedMs / 60000)
-    const elapsedSeconds = Math.floor(elapsedMs / 1000)
-
-    let elapsedLabel = 'just now'
-    if (elapsedMinutes >= 60) {
-      const elapsedHours = Math.floor(elapsedMinutes / 60)
-      elapsedLabel = `${elapsedHours} hour${elapsedHours === 1 ? '' : 's'} ago`
-    } else if (elapsedMinutes >= 1) {
-      elapsedLabel = `${elapsedMinutes} minute${elapsedMinutes === 1 ? '' : 's'} ago`
-    } else if (elapsedSeconds >= 5) {
-      elapsedLabel = `${elapsedSeconds} seconds ago`
-    }
-
-    return `Refreshed ${elapsedLabel} ${
-      this.lastRefreshMode === 'automatic' ? 'automatically' : 'manually'
-    }`
-  }
-
   render() {
     const filteredRows = this.getFilteredRows()
     const visibleColumns = this.getVisibleColumns(filteredRows)
     const skillOptions = this.getAllSkillColumns()
     const filteredSkillOptions = this.getFilteredSkillOptions(skillOptions)
-    const refreshStatusText = this.getRefreshStatusText()
+    const syncMode = this.autoRefreshEnabled ? 'Auto refresh every 30 seconds' : 'Manual refresh only'
     const selectedSkillSummary =
       this.skillFilters.length === 0
         ? 'All skills'
@@ -672,6 +572,11 @@ export class MyElement extends LitElement {
         <header class="topbar">
           <div class="title-group">
             <span class="title">Skill Matrix</span>
+            <div class="stat-row">
+              <span><strong>${this.rows.length}</strong> Profiles</span>
+              <span><strong>${skillOptions.length}</strong> Unique Skills</span>
+              <span><strong>${filteredRows.length}</strong> Rows Visible</span>
+            </div>
           </div>
           <div class="topbar-actions">
             <div class="settings-shell">
@@ -705,23 +610,11 @@ export class MyElement extends LitElement {
                         />
                         <span>Dark Mode</span>
                       </label>
-                      <label class="settings-option">
-                        <input
-                          type="checkbox"
-                          .checked=${this.verticalSkillHeaders}
-                          @change=${this.toggleVerticalSkillHeaders}
-                        />
-                        <span>Vertical Skill Headers</span>
-                      </label>
                     </div>
                   `
                 : null}
             </div>
-            <button
-              class="action-button primary-button"
-              @click=${() => this.loadData('manual')}
-              ?disabled=${this.loading}
-            >
+            <button class="action-button primary-button" @click=${this.loadData} ?disabled=${this.loading}>
               ${this.loading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button class="action-button secondary-button" @click=${this.toggleTranspose}>
@@ -876,18 +769,8 @@ export class MyElement extends LitElement {
                                     <th class="sticky-head sticky-head-1">Profile</th>
                                     ${visibleColumns.map(
                                       (skill) => html`
-                                        <th
-                                          class=${this.verticalSkillHeaders
-                                            ? 'skill-head'
-                                            : 'skill-head horizontal-skill-head'}
-                                        >
-                                          <span
-                                            class=${this.verticalSkillHeaders
-                                              ? 'skill-head-label'
-                                              : 'skill-head-label horizontal-skill-head-label'}
-                                          >
-                                            ${skill}
-                                          </span>
+                                        <th class="skill-head">
+                                          <span class="skill-head-label">${skill}</span>
                                         </th>
                                       `
                                     )}
@@ -920,15 +803,12 @@ export class MyElement extends LitElement {
 
                       <footer class="matrix-footer">
                         <div class="footer-main">
-                          <span>${refreshStatusText}</span>
+                          <span>Last Synced: ${this.lastUpdated || 'Not yet loaded'}</span>
                           <span>Source: Skill Profile Bulk Export</span>
                         </div>
                         <div class="footer-status">
-                          <span><strong>${this.rows.length}</strong> Profiles</span>
-                          <span><strong>${skillOptions.length}</strong> Unique Skills</span>
-                          <span><strong>${filteredRows.length}</strong> Rows Visible</span>
                           <span class="status-dot"></span>
-                          ${this.autoRefreshEnabled ? 'Auto refresh enabled' : 'Auto refresh disabled'}
+                          ${syncMode}
                         </div>
                       </footer>
                     </section>
@@ -1418,14 +1298,6 @@ export class MyElement extends LitElement {
       vertical-align: bottom;
     }
 
-    .horizontal-skill-head {
-      height: auto;
-      min-width: 140px;
-      width: 140px;
-      padding: 14px 12px;
-      vertical-align: bottom;
-    }
-
     .skill-head-label {
       display: inline-block;
       writing-mode: vertical-rl;
@@ -1433,14 +1305,6 @@ export class MyElement extends LitElement {
       white-space: nowrap;
       line-height: 1;
       padding-bottom: 6px;
-    }
-
-    .horizontal-skill-head-label {
-      writing-mode: horizontal-tb;
-      transform: none;
-      white-space: normal;
-      line-height: 1.2;
-      padding-bottom: 0;
     }
 
     .profile-head {
