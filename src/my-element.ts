@@ -47,9 +47,6 @@ export class MyElement extends LitElement {
   @state() private loading = false
   @state() private error = ''
   @state() private rows: MatrixRow[] = []
-  @state() private lastUpdatedAt = 0
-  @state() private lastRefreshMode: 'manual' | 'automatic' = 'manual'
-  @state() private relativeTimeTick = 0
   @state() private apiRequestCount = 0
   @state() private searchTerm = ''
   @state() private skillFilters: string[] = []
@@ -61,11 +58,13 @@ export class MyElement extends LitElement {
   @state() private autoRefreshEnabled = false
   @state() private darkModeEnabled = false
   @state() private verticalSkillHeaders = true
+  @state() private verticalProfileNames = true
 
   private timerId?: number
-  private relativeTimeTimerId?: number
   private boundWindowPointerDown = (event: PointerEvent) =>
     this.handleWindowPointerDown(event)
+  private boundVisibilityChange = () => this.handleVisibilityChange()
+  private boundWindowFocus = () => this.handleWindowFocus()
 
   connectedCallback() {
     super.connectedCallback()
@@ -73,20 +72,21 @@ export class MyElement extends LitElement {
     this.restoreHideEmptyColumns()
     this.restoreDarkModePreference()
     this.restoreVerticalSkillHeaders()
+    this.restoreVerticalProfileNames()
     window.addEventListener('pointerdown', this.boundWindowPointerDown)
-    this.startRelativeTimeTimer()
-    this.loadData('manual')
+    document.addEventListener('visibilitychange', this.boundVisibilityChange)
+    window.addEventListener('focus', this.boundWindowFocus)
+    this.loadData()
     this.startRefreshTimer()
   }
 
   disconnectedCallback() {
     super.disconnectedCallback()
     window.removeEventListener('pointerdown', this.boundWindowPointerDown)
+    document.removeEventListener('visibilitychange', this.boundVisibilityChange)
+    window.removeEventListener('focus', this.boundWindowFocus)
     if (this.timerId) {
       window.clearInterval(this.timerId)
-    }
-    if (this.relativeTimeTimerId) {
-      window.clearInterval(this.relativeTimeTimerId)
     }
   }
 
@@ -101,7 +101,8 @@ export class MyElement extends LitElement {
       changedProperties.has('hideEmptyColumns') ||
       changedProperties.has('darkmode') ||
       changedProperties.has('darkModeEnabled') ||
-      changedProperties.has('verticalSkillHeaders')
+      changedProperties.has('verticalSkillHeaders') ||
+      changedProperties.has('verticalProfileNames')
     ) {
       this.startRefreshTimer()
       if (
@@ -117,6 +118,7 @@ export class MyElement extends LitElement {
       this.restoreSkillFilters()
       this.restoreHideEmptyColumns()
       this.restoreVerticalSkillHeaders()
+      this.restoreVerticalProfileNames()
     }
 
     if (changedProperties.has('skillFilters')) {
@@ -138,6 +140,10 @@ export class MyElement extends LitElement {
     if (changedProperties.has('verticalSkillHeaders')) {
       this.persistVerticalSkillHeaders()
     }
+
+    if (changedProperties.has('verticalProfileNames')) {
+      this.persistVerticalProfileNames()
+    }
   }
 
   private startRefreshTimer() {
@@ -154,31 +160,41 @@ export class MyElement extends LitElement {
     }
 
     this.timerId = window.setInterval(
-      () => this.loadData('automatic'),
+      () => this.loadData(),
       this.refreshMs
     )
   }
 
-  private startRelativeTimeTimer() {
-    if (this.relativeTimeTimerId) {
-      window.clearInterval(this.relativeTimeTimerId)
+  private handleVisibilityChange() {
+    if (document.visibilityState !== 'visible') {
+      return
     }
 
-    this.relativeTimeTimerId = window.setInterval(() => {
-      this.relativeTimeTick = Date.now()
-    }, 60000)
+    this.startRefreshTimer()
+    if (this.token && this.orgId) {
+      this.loadData()
+    } else {
+      this.requestUpdate()
+    }
   }
 
-  private async loadData(refreshMode: 'manual' | 'automatic' = 'manual') {
+  private handleWindowFocus() {
+    this.startRefreshTimer()
+    if (this.token && this.orgId) {
+      this.loadData()
+    } else {
+      this.requestUpdate()
+    }
+  }
+
+  private async loadData() {
     if (!this.token) {
       this.error = 'Missing access token.'
-      this.rows = []
       return
     }
 
     if (!this.orgId) {
       this.error = 'Missing org ID.'
-      this.rows = []
       return
     }
 
@@ -193,9 +209,6 @@ export class MyElement extends LitElement {
 
       this.rows = rows
       this.reconcileSkillFilters()
-      this.lastUpdatedAt = Date.now()
-      this.lastRefreshMode = refreshMode
-      this.relativeTimeTick = this.lastUpdatedAt
     } catch (error) {
       this.rows = []
       this.error =
@@ -334,6 +347,10 @@ export class MyElement extends LitElement {
     return `wxcc-agent-skill-matrix:vertical-skill-headers:${this.orgId || 'default'}`
   }
 
+  private get verticalProfileNamesStorageKey() {
+    return `wxcc-agent-skill-matrix:vertical-profile-names:${this.orgId || 'default'}`
+  }
+
   private restoreSkillFilters() {
     try {
       const raw = window.localStorage.getItem(this.skillStorageKey)
@@ -436,6 +453,31 @@ export class MyElement extends LitElement {
       window.localStorage.setItem(
         this.verticalSkillHeadersStorageKey,
         String(this.verticalSkillHeaders)
+      )
+    } catch {
+      // Ignore storage failures so the widget still works in constrained environments.
+    }
+  }
+
+  private restoreVerticalProfileNames() {
+    try {
+      const raw = window.localStorage.getItem(this.verticalProfileNamesStorageKey)
+      if (raw === null) {
+        this.verticalProfileNames = true
+        return
+      }
+
+      this.verticalProfileNames = raw === 'true'
+    } catch {
+      this.verticalProfileNames = true
+    }
+  }
+
+  private persistVerticalProfileNames() {
+    try {
+      window.localStorage.setItem(
+        this.verticalProfileNamesStorageKey,
+        String(this.verticalProfileNames)
       )
     } catch {
       // Ignore storage failures so the widget still works in constrained environments.
@@ -605,6 +647,10 @@ export class MyElement extends LitElement {
     this.verticalSkillHeaders = (event.target as HTMLInputElement).checked
   }
 
+  private toggleVerticalProfileNames(event: Event) {
+    this.verticalProfileNames = (event.target as HTMLInputElement).checked
+  }
+
   private toggleTranspose() {
     this.isTransposed = !this.isTransposed
   }
@@ -630,38 +676,11 @@ export class MyElement extends LitElement {
     return this.darkModeEnabled ? 'theme-dark' : 'theme-light'
   }
 
-  private getRefreshStatusText() {
-    void this.relativeTimeTick
-
-    if (!this.lastUpdatedAt) {
-      return 'Not yet refreshed'
-    }
-
-    const elapsedMs = Math.max(0, Date.now() - this.lastUpdatedAt)
-    const elapsedMinutes = Math.floor(elapsedMs / 60000)
-    const elapsedSeconds = Math.floor(elapsedMs / 1000)
-
-    let elapsedLabel = 'just now'
-    if (elapsedMinutes >= 60) {
-      const elapsedHours = Math.floor(elapsedMinutes / 60)
-      elapsedLabel = `${elapsedHours} hour${elapsedHours === 1 ? '' : 's'} ago`
-    } else if (elapsedMinutes >= 1) {
-      elapsedLabel = `${elapsedMinutes} minute${elapsedMinutes === 1 ? '' : 's'} ago`
-    } else if (elapsedSeconds >= 5) {
-      elapsedLabel = `${elapsedSeconds} seconds ago`
-    }
-
-    return `Refreshed ${elapsedLabel} ${
-      this.lastRefreshMode === 'automatic' ? 'automatically' : 'manually'
-    }`
-  }
-
   render() {
     const filteredRows = this.getFilteredRows()
     const visibleColumns = this.getVisibleColumns(filteredRows)
     const skillOptions = this.getAllSkillColumns()
     const filteredSkillOptions = this.getFilteredSkillOptions(skillOptions)
-    const refreshStatusText = this.getRefreshStatusText()
     const selectedSkillSummary =
       this.skillFilters.length === 0
         ? 'All skills'
@@ -713,13 +732,25 @@ export class MyElement extends LitElement {
                         />
                         <span>Vertical Skill Headers</span>
                       </label>
+                      ${this.isTransposed
+                        ? html`
+                            <label class="settings-option">
+                              <input
+                                type="checkbox"
+                                .checked=${this.verticalProfileNames}
+                                @change=${this.toggleVerticalProfileNames}
+                              />
+                              <span>Vertical Profile Names</span>
+                            </label>
+                          `
+                        : null}
                     </div>
                   `
                 : null}
             </div>
             <button
               class="action-button primary-button"
-              @click=${() => this.loadData('manual')}
+              @click=${this.loadData}
               ?disabled=${this.loading}
             >
               ${this.loading ? 'Refreshing...' : 'Refresh'}
@@ -738,7 +769,7 @@ export class MyElement extends LitElement {
                 type="search"
                 .value=${this.searchTerm}
                 @input=${this.setSearchTerm}
-                placeholder="Profile, description, or skill"
+                placeholder="Search Profile, Description or Skill"
               />
               <div class="skill-picker-shell">
                 <div class="skill-picker-row">
@@ -839,8 +870,18 @@ export class MyElement extends LitElement {
                                     <th class="sticky-head sticky-head-1">Skill</th>
                                     ${filteredRows.map(
                                       (row) => html`
-                                        <th class="profile-head">
-                                          <span class="profile-head-label">${row.name}</span>
+                                        <th
+                                          class=${this.verticalProfileNames
+                                            ? 'profile-head vertical-profile-head'
+                                            : 'profile-head'}
+                                        >
+                                          <span
+                                            class=${this.verticalProfileNames
+                                              ? 'profile-head-label vertical-profile-head-label'
+                                              : 'profile-head-label'}
+                                          >
+                                            ${row.name}
+                                          </span>
                                         </th>
                                       `
                                     )}
@@ -898,7 +939,9 @@ export class MyElement extends LitElement {
                                     (row) => html`
                                       <tr>
                                         <td class="sticky-col sticky-col-1 name-cell">
-                                          <span class="profile-name">${row.name}</span>
+                                          <span class="profile-name">
+                                            ${row.name}
+                                          </span>
                                         </td>
                                         ${visibleColumns.map((skill) => {
                                           const value = this.normalizeSkillValue(row.skills[skill])
@@ -917,20 +960,6 @@ export class MyElement extends LitElement {
                               </table>
                             `}
                       </div>
-
-                      <footer class="matrix-footer">
-                        <div class="footer-main">
-                          <span>${refreshStatusText}</span>
-                          <span>Source: Skill Profile Bulk Export</span>
-                        </div>
-                        <div class="footer-status">
-                          <span><strong>${this.rows.length}</strong> Profiles</span>
-                          <span><strong>${skillOptions.length}</strong> Unique Skills</span>
-                          <span><strong>${filteredRows.length}</strong> Rows Visible</span>
-                          <span class="status-dot"></span>
-                          ${this.autoRefreshEnabled ? 'Auto refresh enabled' : 'Auto refresh disabled'}
-                        </div>
-                      </footer>
                     </section>
                   `}
         </div>
@@ -967,8 +996,8 @@ export class MyElement extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
-      padding: 16px 24px;
+      gap: 12px;
+      padding: 10px 16px;
       background: rgba(248, 250, 252, 0.94);
       border-bottom: 1px solid rgba(113, 124, 130, 0.14);
       position: sticky;
@@ -980,7 +1009,7 @@ export class MyElement extends LitElement {
     .title {
       display: block;
       font-family: 'Manrope', 'Segoe UI', sans-serif;
-      font-size: 1.2rem;
+      font-size: 1rem;
       font-weight: 800;
       letter-spacing: -0.03em;
     }
@@ -1004,7 +1033,7 @@ export class MyElement extends LitElement {
 
     .topbar-actions {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
     }
 
@@ -1053,9 +1082,10 @@ export class MyElement extends LitElement {
 
     .action-button {
       border: 0;
-      border-radius: 12px;
-      padding: 10px 14px;
+      border-radius: 10px;
+      padding: 7px 10px;
       font: inherit;
+      font-size: 0.85rem;
       font-weight: 700;
       cursor: pointer;
       transition: transform 120ms ease;
@@ -1081,7 +1111,7 @@ export class MyElement extends LitElement {
     }
 
     .filters-panel {
-      padding: 24px;
+      padding: 14px 16px 16px;
     }
 
     .filter-layout {
@@ -1093,16 +1123,17 @@ export class MyElement extends LitElement {
     .filter-row {
       display: grid;
       grid-template-columns: minmax(280px, 1fr) auto auto;
-      gap: 16px;
+      gap: 10px;
       align-items: start;
     }
 
     .filter-input {
       width: 100%;
       border: 0;
-      border-radius: 16px;
-      padding: 14px 16px;
+      border-radius: 12px;
+      padding: 10px 14px;
       font: inherit;
+      font-size: 0.92rem;
       background: #ffffff;
       box-shadow: inset 0 0 0 1px rgba(169, 180, 185, 0.2);
       color: inherit;
@@ -1181,11 +1212,11 @@ export class MyElement extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      min-width: 220px;
+      gap: 10px;
+      min-width: 190px;
       border: 0;
-      border-radius: 16px;
-      padding: 14px 16px;
+      border-radius: 12px;
+      padding: 10px 12px;
       background: #ffffff;
       box-shadow: inset 0 0 0 1px rgba(169, 180, 185, 0.2);
       font: inherit;
@@ -1195,12 +1226,12 @@ export class MyElement extends LitElement {
 
     .trigger-label {
       font-weight: 800;
-      font-size: 0.82rem;
+      font-size: 0.76rem;
       letter-spacing: 0.02em;
     }
 
     .trigger-value {
-      font-size: 0.76rem;
+      font-size: 0.68rem;
       color: #687782;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -1208,20 +1239,20 @@ export class MyElement extends LitElement {
 
     .selected-skill-chips {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
-      min-height: 28px;
+      min-height: 24px;
     }
 
     .selected-skill-chip {
       display: inline-flex;
       align-items: center;
       max-width: 220px;
-      padding: 8px 12px;
+      padding: 6px 10px;
       border-radius: 999px;
       background: #d3e4fe;
       color: #314055;
-      font-size: 0.72rem;
+      font-size: 0.66rem;
       font-weight: 800;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -1399,8 +1430,9 @@ export class MyElement extends LitElement {
     .sticky-head-1,
     .sticky-col-1 {
       left: 0;
-      min-width: 260px;
-      max-width: 260px;
+      min-width: 180px;
+      width: 180px;
+      max-width: 220px;
     }
 
     .sticky-col {
@@ -1450,17 +1482,39 @@ export class MyElement extends LitElement {
       vertical-align: bottom;
     }
 
+    .vertical-profile-head {
+      min-width: 88px;
+      max-width: 88px;
+      width: 88px;
+      text-align: center;
+      vertical-align: bottom;
+      padding: 12px 8px;
+    }
+
     .profile-head-label {
       display: inline-block;
       white-space: normal;
       line-height: 1.2;
     }
 
+    .vertical-profile-head-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      white-space: nowrap;
+      line-height: 1;
+      max-height: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .profile-name {
+      display: inline-block;
       font-size: 0.9rem;
       font-weight: 700;
       color: #2a3439;
       white-space: normal;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
 
     .skill-name-cell {
@@ -1506,36 +1560,6 @@ export class MyElement extends LitElement {
       background: #e1e9ee;
     }
 
-    .matrix-footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      padding: 12px 24px;
-      background: #d9e4ea;
-      color: #566166;
-      font-size: 0.68rem;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      flex-wrap: wrap;
-    }
-
-    .footer-main,
-    .footer-status {
-      display: flex;
-      gap: 18px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: #006592;
-    }
-
     .theme-dark .topbar {
       background: rgba(15, 23, 32, 0.92);
       border-bottom-color: rgba(255, 255, 255, 0.08);
@@ -1549,8 +1573,7 @@ export class MyElement extends LitElement {
     }
 
     .theme-dark .stat-row,
-    .theme-dark .settings-option,
-    .theme-dark .matrix-footer {
+    .theme-dark .settings-option {
       color: #a9b4b9;
     }
 
@@ -1640,10 +1663,6 @@ export class MyElement extends LitElement {
     .theme-dark .value.empty {
       background: #25303a;
       color: #a9b4b9;
-    }
-
-    .theme-dark .status-dot {
-      background: #34b5fa;
     }
 
     .theme-dark .error {
