@@ -61,6 +61,8 @@ export class MyElement extends LitElement {
   @state() private verticalProfileNames = true
 
   private timerId?: number
+  private resizeObserver?: ResizeObserver
+  private wasSizedVisible = false
   private boundWindowPointerDown = (event: PointerEvent) =>
     this.handleWindowPointerDown(event)
   private boundVisibilityChange = () => this.handleVisibilityChange()
@@ -76,6 +78,7 @@ export class MyElement extends LitElement {
     window.addEventListener('pointerdown', this.boundWindowPointerDown)
     document.addEventListener('visibilitychange', this.boundVisibilityChange)
     window.addEventListener('focus', this.boundWindowFocus)
+    this.startResizeObserver()
     this.loadData()
     this.startRefreshTimer()
   }
@@ -88,6 +91,7 @@ export class MyElement extends LitElement {
     if (this.timerId) {
       window.clearInterval(this.timerId)
     }
+    this.resizeObserver?.disconnect()
   }
 
   updated(changedProperties: Map<string, unknown>) {
@@ -163,6 +167,33 @@ export class MyElement extends LitElement {
       () => this.loadData(),
       this.refreshMs
     )
+  }
+
+  private startResizeObserver() {
+    this.resizeObserver?.disconnect()
+
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) {
+        return
+      }
+
+      const { width, height } = entry.contentRect
+      const isVisible = width > 0 && height > 0
+
+      if (isVisible && !this.wasSizedVisible) {
+        this.startRefreshTimer()
+        if (this.token && this.orgId) {
+          this.loadData()
+        } else {
+          this.requestUpdate()
+        }
+      }
+
+      this.wasSizedVisible = isVisible
+    })
+
+    this.resizeObserver.observe(this)
   }
 
   private handleVisibilityChange() {
